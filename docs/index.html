@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="ja">
+<head>
+    <meta charset="utf-8" />
+    <title>将棋盤</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <style>
+        :root{
+            --square-size: 56px;
+            --board-gap: 28px;
+            --wood:#f2d5a9;
+            --line:#8b5a2b;
+            --label-bg:#fff8e6;
+        }
+        html,body{height:100%;margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,"Noto Sans JP","Hiragino Kaku Gothic ProN",sans-serif;background:#f7f7f7}
+        .wrap{min-height:100%;display:flex;align-items:center;justify-content:center;padding:24px;box-sizing:border-box}
+        .container{display:grid;grid-template-columns:auto 1fr 1fr;gap:16px;align-items:start}
+        .labels-rows{display:flex;flex-direction:column;gap:0;margin-top:calc(var(--board-gap) - var(--square-size));}
+        .labels-cols{display:flex;gap:0;margin-left:calc(var(--board-gap) - var(--square-size));}
+        .label{
+            width:var(--square-size);height:var(--square-size);display:flex;align-items:center;justify-content:center;
+            background:var(--label-bg);color:#333;border:1px solid rgba(0,0,0,0.06);box-sizing:border-box;font-weight:600;
+        }
+
+        .board-wrap{position:relative}
+        .board{
+            display:grid;
+            grid-template-columns:repeat(9,var(--square-size));
+            grid-template-rows:repeat(9,var(--square-size));
+            gap:0;
+            background:linear-gradient(180deg,var(--wood),#e6c793);
+            border:6px solid var(--line);
+            box-shadow:0 6px 18px rgba(0,0,0,0.12);
+            position:relative;
+        }
+        .cell{
+            box-sizing:border-box;border:1px solid rgba(0,0,0,0.06);
+            display:flex;align-items:center;justify-content:center;font-size:20px;cursor:pointer;
+            position:relative;user-select:none;
+        }
+        .cell::after{
+            content:"";position:absolute;inset:0;border:1px solid rgba(0,0,0,0.02);pointer-events:none;
+        }
+        .cell .piece{
+            font-size:26px;line-height:1;transform:scale(1);transition:transform .08s;
+            display:inline-block;padding:4px 2px;border-radius:6px;background:linear-gradient(#fff,#fff0);opacity:0.98;
+            box-shadow:0 1px 0 rgba(0,0,0,0.12) inset;
+            -webkit-font-feature-settings:"liga" 0;
+        }
+        .cell:hover .piece{transform:scale(1.05)}
+        .palette{display:flex;flex-wrap:wrap;gap:8px;padding:8px;border:1px solid #eee;background:#fff;border-radius:8px;width:260px}
+        .piece-btn{
+            min-width:44px;padding:8px 10px;border-radius:8px;border:1px solid #ddd;background:#fff;cursor:pointer;
+            display:inline-flex;align-items:center;justify-content:center;font-size:20px;
+        }
+        .piece-btn.selected{outline:3px solid #ffd28a}
+        .controls{display:flex;flex-direction:column;gap:8px}
+        .hint{font-size:13px;color:#666}
+        footer{margin-top:12px;font-size:12px;color:#666}
+        .coord{
+            position:absolute;left:-calc(var(--board-gap) + 6px);top:0;display:flex;flex-direction:column;
+        }
+        @media (max-width:720px){
+            :root{--square-size:40px;--board-gap:20px}
+            .palette{width:200px}
+        }
+    </style>
+</head>
+<body>
+    <div class="wrap">
+        <div class="container">
+            <!-- left column: row labels -->
+            <div class="labels-rows" aria-hidden="true" id="rowLabels"></div>
+
+            <!-- middle: column labels above + board -->
+            <div style="display:flex;flex-direction:column;align-items:flex-start;">
+                <div class="labels-cols" id="colLabels" aria-hidden="true"></div>
+                <div class="board-wrap" role="application" aria-label="将棋盤">
+                    <div class="board" id="board"></div>
+                </div>
+            </div>
+
+            <!-- right: palette -->
+            <div class="controls">
+                <div style="font-weight:700">駒パレット</div>
+                <div class="palette" id="palette" aria-label="駒パレット"></div>
+                <div style="display:flex;gap:8px">
+                    <button id="rotateBtn" class="piece-btn">向き切替</button>
+                    <button id="clearBtn" class="piece-btn">全消去</button>
+                </div>
+                <div class="hint">駒を選んで盤上をクリックで配置。右クリックで消去。</div>
+                <footer>ファイル: 9→1, 段: 一番上が9段</footer>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // シンプルな将棋盤生成と駒配置UI
+        (function(){
+            const files = [9,8,7,6,5,4,3,2,1]; // 左から右の表示（一般的な9→1）
+            const ranks = [9,8,7,6,5,4,3,2,1]; // 上から下の表示
+            const board = document.getElementById('board');
+            const rowLabels = document.getElementById('rowLabels');
+            const colLabels = document.getElementById('colLabels');
+            const palette = document.getElementById('palette');
+            const clearBtn = document.getElementById('clearBtn');
+            const rotateBtn = document.getElementById('rotateBtn');
+
+            // 駒リスト（表示用漢字）
+            const pieces = [
+                {id:'fu', label:'歩'},
+                {id:'ky', label:'香'},
+                {id:'ke', label:'桂'},
+                {id:'gi', label:'銀'},
+                {id:'ki', label:'金'},
+                {id:'ou', label:'玉'},
+                {id:'ka', label:'角'},
+                {id:'hi', label:'飛'}
+            ];
+
+            let selectedPiece = null;
+            let flipped = false; // 盤の向き
+
+            // build labels
+            function buildLabels(){
+                rowLabels.innerHTML = '';
+                colLabels.innerHTML = '';
+                ranks.forEach(r=>{
+                    const el = document.createElement('div');
+                    el.className = 'label';
+                    el.textContent = r + '段';
+                    el.title = r + '段';
+                    rowLabels.appendChild(el);
+                });
+                const spacer = document.createElement('div');
+                spacer.style.width = 'var(--board-gap)';
+                spacer.style.height = 'var(--square-size)';
+                colLabels.appendChild(spacer);
+                files.forEach(f=>{
+                    const el = document.createElement('div');
+                    el.className = 'label';
+                    el.textContent = f;
+                    el.title = f + '筋';
+                    colLabels.appendChild(el);
+                });
+            }
+
+            // build board cells
+            function buildBoard(){
+                board.innerHTML = '';
+                const orderRanks = flipped ? [...ranks].reverse() : ranks;
+                const orderFiles = flipped ? [...files].reverse() : files;
+                for(let r of orderRanks){
+                    for(let f of orderFiles){
+                        const cell = document.createElement('div');
+                        cell.className = 'cell';
+                        cell.tabIndex = 0;
+                        cell.dataset.file = f;
+                        cell.dataset.rank = r;
+                        cell.title = `筋${f} - ${r}段`;
+                        // piece container
+                        const p = document.createElement('div');
+                        p.className = 'piece';
+                        p.textContent = '';
+                        cell.appendChild(p);
+
+                        // left-click to place selected piece, right-click to clear
+                        cell.addEventListener('click', (e)=>{
+                            if(selectedPiece){
+                                p.textContent = selectedPiece.label;
+                                p.dataset.pieceId = selectedPiece.id;
+                                // small orientation marker when flipped
+                                p.style.transform = flipped ? 'rotate(180deg)' : '';
+                            } else {
+                                // toggle clear/empty
+                                p.textContent = '';
+                                delete p.dataset.pieceId;
+                            }
+                        });
+                        cell.addEventListener('contextmenu', (e)=>{
+                            e.preventDefault();
+                            p.textContent = '';
+                            delete p.dataset.pieceId;
+                        });
+
+                        board.appendChild(cell);
+                    }
+                }
+            }
+
+            // build palette UI
+            function buildPalette(){
+                palette.innerHTML = '';
+                pieces.forEach(pk=>{
+                    const btn = document.createElement('button');
+                    btn.className = 'piece-btn';
+                    btn.innerHTML = pk.label;
+                    btn.title = pk.label;
+                    btn.addEventListener('click', ()=>{
+                        // toggle selection
+                        const currently = palette.querySelector('.selected');
+                        if(currently) currently.classList.remove('selected');
+                        if(selectedPiece && selectedPiece.id === pk.id){
+                            // deselect
+                            selectedPiece = null;
+                        } else {
+                            btn.classList.add('selected');
+                            selectedPiece = pk;
+                        }
+                    });
+                    palette.appendChild(btn);
+                });
+                // empty button for "erase" mode
+                const erase = document.createElement('button');
+                erase.className = 'piece-btn';
+                erase.textContent = '消す';
+                erase.title = '選択解除（盤上クリックで消去）';
+                erase.addEventListener('click', ()=>{
+                    const currently = palette.querySelector('.selected');
+                    if(currently) currently.classList.remove('selected');
+                    selectedPiece = null;
+                });
+                palette.appendChild(erase);
+            }
+
+            clearBtn.addEventListener('click', ()=>{
+                document.querySelectorAll('.cell .piece').forEach(p=>{ p.textContent=''; delete p.dataset.pieceId; p.style.transform=''; });
+            });
+
+            rotateBtn.addEventListener('click', ()=>{
+                flipped = !flipped;
+                buildLabels();
+                buildBoard();
+            });
+
+            // init
+            buildLabels();
+            buildPalette();
+            buildBoard();
+
+            // keyboard shortcuts: numbers to select pieces
+            window.addEventListener('keydown',(e)=>{
+                const idx = parseInt(e.key,10);
+                if(!Number.isNaN(idx) && idx>0 && idx<=pieces.length){
+                    const pk = pieces[idx-1];
+                    const prev = palette.querySelector('.selected');
+                    if(prev) prev.classList.remove('selected');
+                    // select corresponding button
+                    const btns = Array.from(palette.children).filter(b=>b.classList.contains('piece-btn'));
+                    const btn = btns[idx-1];
+                    if(btn){
+                        btn.classList.add('selected');
+                        selectedPiece = pk;
+                    }
+                }
+                if(e.key === 'Escape'){
+                    const prev = palette.querySelector('.selected');
+                    if(prev) prev.classList.remove('selected');
+                    selectedPiece = null;
+                }
+            });
+
+        })();
+    </script>
+</body>
+</html>
