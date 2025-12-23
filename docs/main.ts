@@ -314,7 +314,12 @@ export class Rules {
     // =========================
     // 駒別の移動先生成（盤上）
     // =========================
-    private static generateDestinationsForPiece(pos: Position, from: Square, piece: Piece): Square[] {
+    private static generateDestinationsForPiece(
+        pos: Position,
+        from: Square,
+        piece: Piece,
+        allowCaptureKing: boolean = false
+    ): Square[] {
         const b = pos.board;
         const res: Square[] = [];
 
@@ -324,6 +329,7 @@ export class Rules {
             if (!b.isInside(to)) return;
             const dst = b.get(to);
             if (dst && dst.owner === piece.owner) return; // 自駒は不可
+            if (dst && dst.type === PieceType.OU && !allowCaptureKing) return; // 王は取れない
             res.push(to);
         };
 
@@ -337,7 +343,11 @@ export class Rules {
                 if (!dst) {
                     res.push(to);
                 } else {
-                    if (dst.owner !== piece.owner) res.push(to); // 相手駒は取れる
+                    if (dst.owner !== piece.owner) {
+                        if (!(dst.type === PieceType.OU && !allowCaptureKing)) {
+                            res.push(to); // 相手駒は取れる
+                        }
+                    }
                     break; // 駒で遮断
                 }
                 f += df;
@@ -535,7 +545,7 @@ export class Rules {
         // ここは「駒の移動生成」を流用して OK（王も含む）
         for (const { square: from, piece } of pos.board.entries()) {
             if (piece.owner !== attacker) continue;
-            const tos = this.generateDestinationsForPiece(pos, from, piece);
+            const tos = this.generateDestinationsForPiece(pos, from, piece, true);
             if (tos.some((to) => to.file === target.file && to.rank === target.rank)) {
                 // ただし、相手の王が王に近接して攻撃判定するのは OK（将棋の王手判定として正しい）
                 return true;
